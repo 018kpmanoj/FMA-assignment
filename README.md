@@ -13,12 +13,14 @@ Comparative financial statement analysis of **HCL Technologies Ltd.** vs **Wipro
 
 | File | Description |
 |------|-------------|
-| `excel_report.xlsx` | Excel workbook with raw data (P&L, Balance Sheet) and computed ratios (Liquidity, Profitability, Solvency, Turnover, Valuation), DuPont Analysis, and Cash Conversion Cycle |
-| `word_report.docx` | 6-page analytical report (TNR 11, single-spaced) covering Introduction, Intra-Company Analysis, Inter-Company Comparison, DuPont & CCC, and Conclusion |
-| `ratio_calculation_proofs.docx` | Detailed calculation proofs for all 19 ratios + DuPont + CCC with formulas, substitutions, and interpretations |
-| `HCL Tech-1.xlsx` | Source data - HCL Technologies consolidated financials (Moneycontrol) |
-| `Wipro-1.xlsx` | Source data - Wipro consolidated financials (Moneycontrol) |
-| `_build_final.py` | Python script used to generate the Excel and Word deliverables |
+| `excel_report.xlsx` | Excel workbook with **complete** raw data (Balance Sheet, P&L, Cash Flow - all rows), computed ratios, DuPont Analysis, and Cash Conversion Cycle |
+| `word_report.docx` | Analytical report (TNR 11, single-spaced) with Introduction, Intra-Company Analysis, Inter-Company Comparison, DuPont & CCC derivations, and Conclusion |
+| `ratio_calculation_proofs.docx` | Enhanced calculation proofs for all 19 ratios + DuPont + CCC with formulas, **source derivation references** (where each value comes from), substitutions, and interpretations |
+| `HCL Tech-1.xlsx` | Source data - HCL Technologies **consolidated only** financials (Balance Sheet, P&L, Cash Flow) from Moneycontrol |
+| `Wipro-1.xlsx` | Source data - Wipro **consolidated only** financials (Balance Sheet, P&L, Cash Flow) from Moneycontrol |
+| `_build_final.py` | Python script that cleans datasets, generates Excel and Word deliverables |
+
+**Note:** The dataset files (`HCL Tech-1.xlsx`, `Wipro-1.xlsx`) contain only consolidated financial statements. Standalone data and the Moneycontrol pre-computed Ratios sheet have been removed since all ratios are independently computed in `excel_report.xlsx`.
 
 ## Ratios Computed
 

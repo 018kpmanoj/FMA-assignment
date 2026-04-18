@@ -3,9 +3,9 @@ FMA EC1 Assignment - Final Build Script
 HCL Technologies vs Wipro | Data: HCL Tech-1.xlsx, Wipro-1.xlsx (Moneycontrol)
 Student: K P Manoj | Roll: 2025MB26539
 """
-import os, shutil
+import os, shutil, copy
 from pathlib import Path
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.properties import CalcProperties
@@ -16,7 +16,7 @@ from docx.oxml.ns import qn, nsdecls
 from docx.oxml import parse_xml
 
 BASE = Path(__file__).resolve().parent
-FINAL = BASE / "output"
+FINAL = BASE
 
 YEARS = ["FY2025", "FY2024", "FY2023", "FY2022", "FY2021"]
 FACE_VALUE = 2
@@ -149,6 +149,37 @@ HR = compute_ratios(H_PNL, H_BS, H_MKT)
 WR = compute_ratios(W_PNL, W_BS, W_MKT)
 
 
+# =======================  DATASET CLEANUP  =======================
+def clean_dataset_files():
+    """Remove standalone columns (1-8) and Ratios sheet from raw dataset files.
+
+    The raw Moneycontrol files have:
+      Columns 1-6 : Standalone financials
+      Columns 7-8 : Empty separator
+      Columns 9-14: Consolidated financials
+    After cleanup, only consolidated data remains (columns 9-14 become 1-6).
+    The Ratios sheet is removed because we compute our own ratios in excel_report.
+    """
+    for fname in ["HCL Tech-1.xlsx", "Wipro-1.xlsx"]:
+        src = BASE / fname
+        if not src.exists():
+            print(f"[SKIP] {fname} not found")
+            continue
+
+        wb = load_workbook(src)
+
+        if 'Ratios' in wb.sheetnames:
+            del wb['Ratios']
+            print(f"  Removed 'Ratios' sheet from {fname}")
+
+        for ws in wb.worksheets:
+            ws.delete_cols(1, 8)
+
+        wb.save(src)
+        wb.close()
+        print(f"[OK] Cleaned {fname}: standalone columns removed, consolidated only")
+
+
 # ==========================  EXCEL BUILDER  ==========================
 THIN = Side(style='thin')
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
@@ -182,106 +213,61 @@ def _style_section(ws, row, max_col):
         cell = ws.cell(row=row, column=c)
         cell.font = SEC_FONT; cell.fill = SEC_FILL; cell.border = BORDER
 
-def _write_data_sheet(ws, title, pnl, bs, mkt):
-    """Write raw P&L and BS data into a single sheet for one company."""
+
+def _write_full_data_sheet(ws, title, raw_file_path):
+    """Copy ALL consolidated data from cleaned raw file into an excel_report sheet.
+
+    After cleanup, the raw file has: Col1=Labels, Col2-6=FY2025..FY2021.
+    Each sheet (Balance Sheet, P&L, Cash Flow) is copied in full.
+    """
     ws.merge_cells('A1:F1')
     ws['A1'] = title
     ws['A1'].font = Font(name="Calibri", size=12, bold=True, color="1F4E79")
 
-    r = 3
-    headers = ["Particulars"] + YEARS
-    for c, h in enumerate(headers, 1):
-        ws.cell(r, c, h)
-    _style_header(ws, r, 6)
+    raw_wb = load_workbook(raw_file_path, data_only=True)
+    out_row = 3
 
-    pnl_items = [
-        ("PROFIT & LOSS", None),
-        ("Revenue From Operations [Net]", pnl['revenue']),
-        ("Other Income", pnl['other_inc']),
-        ("Total Revenue", pnl['total_rev']),
-        ("", None),
-        ("Purchase Of Stock-In Trade", pnl['purchase']),
-        ("Operating And Direct Expenses", pnl['op_exp']),
-        ("Changes In Inventories", pnl['inv_change']),
-        ("Employee Benefit Expenses", pnl['emp_exp']),
-        ("Finance Costs", pnl['fin_cost']),
-        ("Depreciation And Amortisation", pnl['depr']),
-        ("Other Expenses", pnl['other_exp']),
-        ("Total Expenses", pnl['total_exp']),
-        ("", None),
-        ("Profit Before Tax (PBT)", pnl['pbt']),
-        ("Total Tax Expenses", pnl['tax']),
-        ("Profit After Tax (PAT)", pnl['pat']),
-        ("PAT After Minority Interest", pnl['pat_mi']),
-    ]
-    r = 4
-    for label, vals in pnl_items:
-        ws.cell(r, 1, label)
-        if vals is None and label:
-            _style_section(ws, r, 6)
-        elif vals:
-            for c, v in enumerate(vals, 2):
-                ws.cell(r, c, v)
-            _style_data(ws, r, 6)
-        r += 1
+    for sheet_name in raw_wb.sheetnames:
+        raw_ws = raw_wb[sheet_name]
 
-    r += 1
-    bs_items = [
-        ("BALANCE SHEET", None),
-        ("Equity Share Capital", bs['eq_capital']),
-        ("Reserves and Surplus", bs['reserves']),
-        ("Total Shareholders Funds", bs['total_shf']),
-        ("", None),
-        ("Long Term Borrowings", bs['lt_borr']),
-        ("Short Term Borrowings", bs['st_borr']),
-        ("Trade Payables", bs['trade_pay']),
-        ("Total Current Liabilities", bs['total_cl']),
-        ("Total Non-Current Liabilities", bs['total_ncl']),
-        ("", None),
-        ("Total Assets", bs['total_assets']),
-        ("Fixed Assets (Net Block)", bs['fixed_assets']),
-        ("Inventories", bs['inventories']),
-        ("Trade Receivables", bs['trade_rec']),
-        ("Cash And Cash Equivalents", bs['cash']),
-        ("Current Investments", bs['curr_inv']),
-        ("Total Current Assets", bs['total_ca']),
-    ]
-    for label, vals in bs_items:
-        ws.cell(r, 1, label)
-        if vals is None and label:
-            _style_section(ws, r, 6)
-        elif vals:
-            for c, v in enumerate(vals, 2):
-                ws.cell(r, c, v)
-            _style_data(ws, r, 6)
-        r += 1
+        ws.cell(out_row, 1, sheet_name.upper())
+        _style_section(ws, out_row, 6)
+        out_row += 1
 
-    r += 1
-    ws.cell(r, 1, "DERIVED / MARKET DATA"); _style_section(ws, r, 6); r += 1
-    derived = [
-        ("Total Debt (LT+ST Borrowings)", [bs['lt_borr'][i]+bs['st_borr'][i] for i in range(5)]),
-        ("Capital Employed (Assets - CL)", [bs['total_assets'][i]-bs['total_cl'][i] for i in range(5)]),
-        ("Face Value per Share (Rs)", [FACE_VALUE]*5),
-        ("Shares Outstanding (Cr)", [bs['eq_capital'][i]/FACE_VALUE for i in range(5)]),
-        ("Book Value per Share (Rs)", [bs['total_shf'][i]/(bs['eq_capital'][i]/FACE_VALUE) for i in range(5)]),
-        ("Price/BV (Moneycontrol)", mkt['price_bv']),
-        ("Market Price per Share (Rs)", [mkt['price_bv'][i]*mkt['bv_share'][i] for i in range(5)]),
-    ]
-    for label, vals in derived:
-        ws.cell(r, 1, label)
-        for c, v in enumerate(vals, 2):
-            ws.cell(r, c, v)
-        _style_data(ws, r, 6)
-        r += 1
+        headers = ["Particulars"] + YEARS
+        for c, h in enumerate(headers, 1):
+            ws.cell(out_row, c, h)
+        _style_header(ws, out_row, 6)
+        out_row += 1
 
-    ws.column_dimensions['A'].width = 38
+        for src_r in range(4, raw_ws.max_row + 1):
+            label = raw_ws.cell(src_r, 1).value
+            vals = [raw_ws.cell(src_r, c).value for c in range(2, 7)]
+
+            if label is None and all(v is None for v in vals):
+                continue
+
+            ws.cell(out_row, 1, label)
+            for ci, v in enumerate(vals, 2):
+                if v is not None:
+                    ws.cell(out_row, ci, v)
+
+            if all(v is None for v in vals) and label:
+                _style_section(ws, out_row, 6)
+            else:
+                _style_data(ws, out_row, 6)
+            out_row += 1
+
+        out_row += 1
+
+    raw_wb.close()
+
+    ws.column_dimensions['A'].width = 42
     for c in range(2, 7):
-        ws.column_dimensions[get_column_letter(c)].width = 14
-    return r
+        ws.column_dimensions[get_column_letter(c)].width = 15
 
 
 def _write_ratios_sheet(ws, hr, wr):
-    """Write all computed ratios side-by-side."""
     ws.merge_cells('A1:L1')
     ws['A1'] = "Financial Ratios - HCL Technologies vs Wipro (FY2021-FY2025)"
     ws['A1'].font = Font(name="Calibri", size=12, bold=True, color="1F4E79")
@@ -301,7 +287,7 @@ def _write_ratios_sheet(ws, hr, wr):
     _style_header(ws, r, 12)
 
     RATIO_NAMES = [
-        None,  # section header placeholder
+        None,
         "Current Ratio", "Quick Ratio", "Absolute Liquid Ratio",
         None,
         "Gross Profit Ratio (%)", "Operating Profit Ratio (%)",
@@ -453,7 +439,6 @@ def _write_ccc_sheet(ws, hr, wr):
 def create_excel(out_path):
     wb = Workbook()
 
-    # --- Cover ---
     ws_cover = wb.active
     ws_cover.title = "Cover"
     ws_cover.merge_cells('A2:F2')
@@ -480,28 +465,28 @@ def create_excel(out_path):
     ws_cover.column_dimensions['B'].width = 22
     ws_cover.column_dimensions['C'].width = 40
 
-    # --- Raw Data Sheets ---
     ws_h = wb.create_sheet("HCL_Data")
-    _write_data_sheet(ws_h, "HCL Technologies - Consolidated Financial Data (Rs Cr)", H_PNL, H_BS, H_MKT)
+    hcl_raw = BASE / "HCL Tech-1.xlsx"
+    _write_full_data_sheet(ws_h,
+                           "HCL Technologies - Consolidated Financial Data (Rs Cr)",
+                           hcl_raw)
 
     ws_w = wb.create_sheet("Wipro_Data")
-    _write_data_sheet(ws_w, "Wipro Ltd. - Consolidated Financial Data (Rs Cr)", W_PNL, W_BS, W_MKT)
+    wipro_raw = BASE / "Wipro-1.xlsx"
+    _write_full_data_sheet(ws_w,
+                           "Wipro Ltd. - Consolidated Financial Data (Rs Cr)",
+                           wipro_raw)
 
-    # --- Ratios ---
     ws_rat = wb.create_sheet("Ratios")
     _write_ratios_sheet(ws_rat, HR, WR)
 
-    # --- DuPont ---
     ws_dup = wb.create_sheet("DuPont")
     _write_dupont_sheet(ws_dup, HR, WR)
 
-    # --- CCC ---
     ws_ccc = wb.create_sheet("CCC")
     _write_ccc_sheet(ws_ccc, HR, WR)
 
-    # Calc properties
     wb.calculation = CalcProperties(calcMode='auto', fullCalcOnLoad=True)
-
     wb.save(out_path)
     print(f"[OK] Excel saved: {out_path}")
 
@@ -592,7 +577,6 @@ def create_word_report(out_path):
         section.left_margin = Cm(2.54)
         section.right_margin = Cm(2.54)
 
-    # ---- TITLE ----
     _add_para(doc, "Financial Statement Analysis", bold=True, size=16,
               align=WD_ALIGN_PARAGRAPH.CENTER)
     _add_para(doc, "HCL Technologies Ltd. vs Wipro Ltd.", bold=True, size=14,
@@ -843,10 +827,34 @@ def create_word_report(out_path):
         ])
 
     _add_para(doc,
-        f"HCL FY2025: ROE = {HR['_npm'][0]:.4f} x {HR['_at'][0]:.4f} x {HR['_em'][0]:.4f} x 100 = "
-        f"{HR['_roe_d'][0]:.2f}%. "
-        f"Wipro FY2025: ROE = {WR['_npm'][0]:.4f} x {WR['_at'][0]:.4f} x {WR['_em'][0]:.4f} x 100 = "
-        f"{WR['_roe_d'][0]:.2f}%.")
+        "DuPont Derivation - HCL FY2025:")
+    _add_para(doc,
+        f"  Net Profit Margin = PAT / Revenue = 17,399 / 1,17,055 = {HR['_npm'][0]:.4f} "
+        f"(PAT from HCL P&L; Revenue from HCL P&L)", size=10)
+    _add_para(doc,
+        f"  Asset Turnover = Revenue / Total Assets = 1,17,055 / 1,05,544 = {HR['_at'][0]:.4f} "
+        f"(Revenue from HCL P&L; Total Assets from HCL Balance Sheet)", size=10)
+    _add_para(doc,
+        f"  Equity Multiplier = Total Assets / Total Shareholders' Funds = 1,05,544 / 69,655 = {HR['_em'][0]:.4f} "
+        f"(both from HCL Balance Sheet)", size=10)
+    _add_para(doc,
+        f"  ROE = {HR['_npm'][0]:.4f} x {HR['_at'][0]:.4f} x {HR['_em'][0]:.4f} x 100 = "
+        f"{HR['_roe_d'][0]:.2f}%", size=10)
+    _add_para(doc,
+        "DuPont Derivation - Wipro FY2025:")
+    _add_para(doc,
+        f"  Net Profit Margin = PAT / Revenue = 13,192.6 / 89,088.4 = {WR['_npm'][0]:.4f} "
+        f"(PAT from Wipro P&L; Revenue from Wipro P&L)", size=10)
+    _add_para(doc,
+        f"  Asset Turnover = Revenue / Total Assets = 89,088.4 / 1,28,185.2 = {WR['_at'][0]:.4f} "
+        f"(Revenue from Wipro P&L; Total Assets from Wipro Balance Sheet)", size=10)
+    _add_para(doc,
+        f"  Equity Multiplier = Total Assets / Total Shareholders' Funds = 1,28,185.2 / 82,364.1 = {WR['_em'][0]:.4f} "
+        f"(both from Wipro Balance Sheet)", size=10)
+    _add_para(doc,
+        f"  ROE = {WR['_npm'][0]:.4f} x {WR['_at'][0]:.4f} x {WR['_em'][0]:.4f} x 100 = "
+        f"{WR['_roe_d'][0]:.2f}%", size=10)
+
     _add_para(doc,
         "The DuPont analysis reveals that the 9-percentage-point gap in ROE between HCLTech (25.0%) "
         "and Wipro (16.0%) is almost entirely attributable to asset turnover (1.109 vs 0.695). Both "
@@ -876,6 +884,37 @@ def create_word_report(out_path):
             ["CCC (days)", f"{HR['_ccc'][0]:.1f}", f"{HR['_ccc'][4]:.1f}",
              f"{WR['_ccc'][0]:.1f}", f"{WR['_ccc'][4]:.1f}"],
         ])
+
+    h_cogs_v = H_PNL['purchase'][0] + H_PNL['op_exp'][0] + H_PNL['inv_change'][0]
+    w_cogs_v = W_PNL['purchase'][0] + W_PNL['op_exp'][0] + W_PNL['inv_change'][0]
+    h_purch = H_PNL['purchase'][0] + H_PNL['op_exp'][0] + H_PNL['other_exp'][0]
+    w_purch = W_PNL['purchase'][0] + W_PNL['op_exp'][0] + W_PNL['other_exp'][0]
+
+    _add_para(doc, "CCC Derivation - HCL FY2025:", bold=False, size=10)
+    _add_para(doc,
+        f"  DIO = 365 x Avg(Inventories FY25, FY24) / COGS = 365 x Avg(133, 185) / {h_cogs_v:,} = {HR['_dio'][0]:.1f} days "
+        f"(Inventories from HCL Balance Sheet; COGS = Purchase + Operating Exp + Inv Changes from HCL P&L)", size=10)
+    _add_para(doc,
+        f"  DSO = 365 x Avg(Trade Rec FY25, FY24) / Revenue = 365 x Avg(25,842, 25,521) / 1,17,055 = {HR['_dso'][0]:.1f} days "
+        f"(Trade Receivables from HCL Balance Sheet; Revenue from HCL P&L)", size=10)
+    _add_para(doc,
+        f"  DPO = 365 x Avg(Trade Pay FY25, FY24) / Purchases = 365 x Avg(13,234, 5,853) / {h_purch:,} = {HR['_dpo'][0]:.1f} days "
+        f"(Trade Payables from HCL Balance Sheet; Purchases = Purchase + Op Exp + Other Exp from HCL P&L)", size=10)
+    _add_para(doc,
+        f"  CCC = DIO + DSO - DPO = {HR['_dio'][0]:.1f} + {HR['_dso'][0]:.1f} - {HR['_dpo'][0]:.1f} = {HR['_ccc'][0]:.1f} days", size=10)
+
+    _add_para(doc, "CCC Derivation - Wipro FY2025:", bold=False, size=10)
+    _add_para(doc,
+        f"  DIO = 365 x Avg(69.4, 90.7) / {w_cogs_v:,.1f} = {WR['_dio'][0]:.1f} days "
+        f"(Inventories from Wipro Balance Sheet; COGS from Wipro P&L)", size=10)
+    _add_para(doc,
+        f"  DSO = 365 x Avg(11,774.5, 17,382.2) / 89,088.4 = {WR['_dso'][0]:.1f} days "
+        f"(Trade Receivables from Wipro Balance Sheet; Revenue from Wipro P&L)", size=10)
+    _add_para(doc,
+        f"  DPO = 365 x Avg(5,866.7, 5,765.5) / {w_purch:,.1f} = {WR['_dpo'][0]:.1f} days "
+        f"(Trade Payables from Wipro Balance Sheet; Purchases from Wipro P&L)", size=10)
+    _add_para(doc,
+        f"  CCC = {WR['_dio'][0]:.1f} + {WR['_dso'][0]:.1f} - {WR['_dpo'][0]:.1f} = {WR['_ccc'][0]:.1f} days", size=10)
 
     _add_para(doc,
         f"Both companies exhibit negative CCCs (HCL: {HR['_ccc'][0]:.1f} days, "
@@ -940,7 +979,7 @@ def create_word_report(out_path):
     print(f"[OK] Word report saved: {out_path}")
 
 
-# ==========================  RATIO PROOFS  ==========================
+# ==========================  RATIO PROOFS (Enhanced with Source Derivations)  ==========================
 def create_ratio_proofs(out_path):
     doc = Document()
     _set_doc_defaults(doc)
@@ -958,225 +997,677 @@ def create_ratio_proofs(out_path):
               align=WD_ALIGN_PARAGRAPH.CENTER)
     _add_para(doc, "Data Source: HCL Tech-1.xlsx and Wipro-1.xlsx (Moneycontrol Consolidated)", size=10,
               align=WD_ALIGN_PARAGRAPH.CENTER)
+    _add_para(doc, "All values in Rs. Crore unless stated otherwise.", size=10,
+              align=WD_ALIGN_PARAGRAPH.CENTER, italic=True)
     _add_para(doc, "")
 
-    def proof(name, formula, hcl_calc, hcl_result, wip_calc, wip_result, why):
+    def proof_enhanced(name, formula, hcl_inputs, hcl_calc, hcl_result,
+                       wip_inputs, wip_calc, wip_result, interpretation):
+        """Enhanced proof with source derivation for each input value."""
         _add_para(doc, name, bold=True, size=11)
         _add_para(doc, f"Formula: {formula}", italic=True, size=10)
-        _add_para(doc, f"HCL FY2025: {hcl_calc} = {hcl_result}", size=10)
-        _add_para(doc, f"Wipro FY2025: {wip_calc} = {wip_result}", size=10)
-        _add_para(doc, f"Interpretation: {why}", size=10)
         _add_para(doc, "")
 
+        _add_para(doc, "HCL Technologies FY2025 - Input Values:", bold=True, size=10)
+        for inp in hcl_inputs:
+            p = doc.add_paragraph(style='List Bullet')
+            run = p.add_run(inp)
+            run.font.name = 'Times New Roman'
+            run.font.size = Pt(9)
+            p.paragraph_format.space_after = Pt(1)
+        _add_para(doc, f"Substitution: {hcl_calc}", size=10)
+        _add_para(doc, f"Result: {hcl_result}", size=10, bold=True)
+        _add_para(doc, "")
+
+        _add_para(doc, "Wipro FY2025 - Input Values:", bold=True, size=10)
+        for inp in wip_inputs:
+            p = doc.add_paragraph(style='List Bullet')
+            run = p.add_run(inp)
+            run.font.name = 'Times New Roman'
+            run.font.size = Pt(9)
+            p.paragraph_format.space_after = Pt(1)
+        _add_para(doc, f"Substitution: {wip_calc}", size=10)
+        _add_para(doc, f"Result: {wip_result}", size=10, bold=True)
+        _add_para(doc, "")
+
+        _add_para(doc, f"Interpretation: {interpretation}", size=10, italic=True)
+        _add_para(doc, "")
+
+    # ===================== A. LIQUIDITY RATIOS =====================
     _add_heading(doc, "A. Liquidity Ratios", level=2)
 
-    proof("1. Current Ratio",
-          "Total Current Assets / Total Current Liabilities",
-          f"62,109 / 28,039", f"{HR['Current Ratio'][0]:.2f}x",
-          f"77,777.5 / 28,625.3", f"{WR['Current Ratio'][0]:.2f}x",
-          "Both companies maintain healthy liquidity (>2x). Wipro has a marginally higher ratio "
-          "due to its large current investment portfolio (Rs 41,147 Cr vs HCL's Rs 7,473 Cr).")
+    proof_enhanced(
+        "1. Current Ratio",
+        "Total Current Assets / Total Current Liabilities",
+        [
+            "Total Current Assets = 62,109 (from HCL Balance Sheet \u2192 'Total Current Assets' row)",
+            "Total Current Liabilities = 28,039 (from HCL Balance Sheet \u2192 'Total Current Liabilities' row)",
+        ],
+        "Current Ratio = 62,109 / 28,039",
+        f"Current Ratio = {HR['Current Ratio'][0]:.2f}x",
+        [
+            "Total Current Assets = 77,777.5 (from Wipro Balance Sheet \u2192 'Total Current Assets' row)",
+            "Total Current Liabilities = 28,625.3 (from Wipro Balance Sheet \u2192 'Total Current Liabilities' row)",
+        ],
+        "Current Ratio = 77,777.5 / 28,625.3",
+        f"Current Ratio = {WR['Current Ratio'][0]:.2f}x",
+        "Both companies maintain healthy liquidity (>2x). Wipro has a marginally higher ratio "
+        "due to its large current investment portfolio (Rs 41,147 Cr vs HCL's Rs 7,473 Cr)."
+    )
 
-    proof("2. Quick Ratio",
-          "(Total Current Assets - Inventories) / Total Current Liabilities",
-          f"(62,109 - 133) / 28,039", f"{HR['Quick Ratio'][0]:.2f}x",
-          f"(77,777.5 - 69.4) / 28,625.3", f"{WR['Quick Ratio'][0]:.2f}x",
-          "Quick ratio is nearly identical to the current ratio for both companies because "
-          "IT services firms hold negligible inventory (HCL: Rs 133 Cr, Wipro: Rs 69 Cr).")
+    proof_enhanced(
+        "2. Quick Ratio",
+        "(Total Current Assets - Inventories) / Total Current Liabilities",
+        [
+            "Total Current Assets = 62,109 (from HCL Balance Sheet \u2192 'Total Current Assets' row)",
+            "Inventories = 133 (from HCL Balance Sheet \u2192 'Inventories' row)",
+            "Total Current Liabilities = 28,039 (from HCL Balance Sheet \u2192 'Total Current Liabilities' row)",
+        ],
+        "Quick Ratio = (62,109 - 133) / 28,039 = 61,976 / 28,039",
+        f"Quick Ratio = {HR['Quick Ratio'][0]:.2f}x",
+        [
+            "Total Current Assets = 77,777.5 (from Wipro Balance Sheet \u2192 'Total Current Assets' row)",
+            "Inventories = 69.4 (from Wipro Balance Sheet \u2192 'Inventories' row)",
+            "Total Current Liabilities = 28,625.3 (from Wipro Balance Sheet \u2192 'Total Current Liabilities' row)",
+        ],
+        "Quick Ratio = (77,777.5 - 69.4) / 28,625.3 = 77,708.1 / 28,625.3",
+        f"Quick Ratio = {WR['Quick Ratio'][0]:.2f}x",
+        "Quick ratio is nearly identical to the current ratio for both companies because "
+        "IT services firms hold negligible inventory (HCL: Rs 133 Cr, Wipro: Rs 69 Cr)."
+    )
 
-    proof("3. Absolute Liquid Ratio",
-          "(Cash + Current Investments) / Total Current Liabilities",
-          f"(21,289 + 7,473) / 28,039", f"{HR['Absolute Liquid Ratio'][0]:.2f}x",
-          f"(12,197.4 + 41,147.4) / 28,625.3", f"{WR['Absolute Liquid Ratio'][0]:.2f}x",
-          "Wipro's absolute liquid ratio is significantly higher (1.86x vs 1.03x) due to its "
-          "massive current investment portfolio. Both are well above the standard benchmark of 0.5x.")
+    proof_enhanced(
+        "3. Absolute Liquid Ratio",
+        "(Cash and Cash Equivalents + Current Investments) / Total Current Liabilities",
+        [
+            "Cash and Cash Equivalents = 21,289 (from HCL Balance Sheet \u2192 'Cash And Cash Equivalents' row)",
+            "Current Investments = 7,473 (from HCL Balance Sheet \u2192 'Current Investments' row)",
+            "Total Current Liabilities = 28,039 (from HCL Balance Sheet \u2192 'Total Current Liabilities' row)",
+        ],
+        "Absolute Liquid Ratio = (21,289 + 7,473) / 28,039 = 28,762 / 28,039",
+        f"Absolute Liquid Ratio = {HR['Absolute Liquid Ratio'][0]:.2f}x",
+        [
+            "Cash and Cash Equivalents = 12,197.4 (from Wipro Balance Sheet \u2192 'Cash And Cash Equivalents' row)",
+            "Current Investments = 41,147.4 (from Wipro Balance Sheet \u2192 'Current Investments' row)",
+            "Total Current Liabilities = 28,625.3 (from Wipro Balance Sheet \u2192 'Total Current Liabilities' row)",
+        ],
+        "Absolute Liquid Ratio = (12,197.4 + 41,147.4) / 28,625.3 = 53,344.8 / 28,625.3",
+        f"Absolute Liquid Ratio = {WR['Absolute Liquid Ratio'][0]:.2f}x",
+        "Wipro's absolute liquid ratio is significantly higher (1.86x vs 1.03x) due to its "
+        "massive current investment portfolio. Both are well above the standard benchmark of 0.5x."
+    )
 
+    # ===================== B. PROFITABILITY RATIOS =====================
     _add_heading(doc, "B. Profitability Ratios", level=2)
 
     h_cogs = H_PNL['purchase'][0] + H_PNL['op_exp'][0] + H_PNL['inv_change'][0]
     w_cogs = W_PNL['purchase'][0] + W_PNL['op_exp'][0] + W_PNL['inv_change'][0]
-    proof("4. Gross Profit Ratio (%)",
-          "(Revenue - COGS) / Revenue x 100, where COGS = Purchase + Operating Expenses + Inventory Changes",
-          f"(1,17,055 - {h_cogs:,.0f}) / 1,17,055 x 100", f"{HR['Gross Profit Ratio (%)'][0]:.2f}%",
-          f"(89,088.4 - {w_cogs:,.1f}) / 89,088.4 x 100", f"{WR['Gross Profit Ratio (%)'][0]:.2f}%",
-          "High GP ratios (>85%) are normal for IT services where direct material costs are minimal. "
-          "The primary cost driver is employee expenses, which is classified separately.")
 
-    proof("5. Operating Profit Ratio (%) - EBIT Margin",
-          "(PBT + Finance Costs) / Revenue x 100",
-          f"(23,261 + 644) / 1,17,055 x 100", f"{HR['Operating Profit Ratio (%)'][0]:.2f}%",
-          f"(17,470.3 + 1,477) / 89,088.4 x 100", f"{WR['Operating Profit Ratio (%)'][0]:.2f}%",
-          "HCL's EBIT margin (20.42%) marginally trails Wipro (21.26%) in FY2025. However, HCL has "
-          "been more consistent over 5 years with less volatility in operating margins.")
+    proof_enhanced(
+        "4. Gross Profit Ratio (%)",
+        "(Revenue - COGS) / Revenue x 100\nwhere COGS = Purchase of Stock-in-Trade + Operating & Direct Expenses + Changes in Inventories",
+        [
+            "Revenue = 1,17,055 (from HCL P&L \u2192 'Revenue From Operations [Net]' row)",
+            f"Purchase of Stock-in-Trade = {H_PNL['purchase'][0]:,} (from HCL P&L \u2192 'Purchase Of Stock-In Trade' row)",
+            f"Operating & Direct Expenses = {H_PNL['op_exp'][0]:,} (from HCL P&L \u2192 'Operating And Direct Expenses' row)",
+            f"Changes in Inventories = {H_PNL['inv_change'][0]} (from HCL P&L \u2192 'Changes In Inventories' row)",
+            f"COGS = {H_PNL['purchase'][0]:,} + {H_PNL['op_exp'][0]:,} + {H_PNL['inv_change'][0]} = {h_cogs:,}",
+        ],
+        f"Gross Profit Ratio = (1,17,055 - {h_cogs:,}) / 1,17,055 x 100 = {117055 - h_cogs:,} / 1,17,055 x 100",
+        f"Gross Profit Ratio = {HR['Gross Profit Ratio (%)'][0]:.2f}%",
+        [
+            "Revenue = 89,088.4 (from Wipro P&L \u2192 'Revenue From Operations [Net]' row)",
+            f"Purchase of Stock-in-Trade = {W_PNL['purchase'][0]} (from Wipro P&L \u2192 'Purchase Of Stock-In Trade' row)",
+            f"Operating & Direct Expenses = {W_PNL['op_exp'][0]:,} (from Wipro P&L \u2192 'Operating And Direct Expenses' row)",
+            f"Changes in Inventories = {W_PNL['inv_change'][0]} (from Wipro P&L \u2192 'Changes In Inventories' row)",
+            f"COGS = {W_PNL['purchase'][0]} + {W_PNL['op_exp'][0]:,} + {W_PNL['inv_change'][0]} = {w_cogs:,.1f}",
+        ],
+        f"Gross Profit Ratio = (89,088.4 - {w_cogs:,.1f}) / 89,088.4 x 100",
+        f"Gross Profit Ratio = {WR['Gross Profit Ratio (%)'][0]:.2f}%",
+        "High GP ratios (>85%) are normal for IT services where direct material costs are minimal. "
+        "The primary cost driver is employee expenses, which is classified separately."
+    )
 
-    proof("6. Net Profit Ratio (%)",
-          "PAT / Revenue x 100",
-          f"17,399 / 1,17,055 x 100", f"{HR['Net Profit Ratio (%)'][0]:.2f}%",
-          f"13,192.6 / 89,088.4 x 100", f"{WR['Net Profit Ratio (%)'][0]:.2f}%",
-          "Both companies have comparable NPM in FY2025 (~14.8%), but HCL has maintained this level "
-          "more consistently while Wipro dipped to 12.4% in FY2024 before recovering.")
+    h_ebit = H_PNL['pbt'][0] + H_PNL['fin_cost'][0]
+    w_ebit = W_PNL['pbt'][0] + W_PNL['fin_cost'][0]
+
+    proof_enhanced(
+        "5. Operating Profit Ratio (%) - EBIT Margin",
+        "EBIT / Revenue x 100\nwhere EBIT = Profit Before Tax (PBT) + Finance Costs",
+        [
+            f"PBT = {H_PNL['pbt'][0]:,} (from HCL P&L \u2192 'Profit/Loss Before Tax' row)",
+            f"Finance Costs = {H_PNL['fin_cost'][0]} (from HCL P&L \u2192 'Finance Costs' row)",
+            f"EBIT = {H_PNL['pbt'][0]:,} + {H_PNL['fin_cost'][0]} = {h_ebit:,}",
+            "Revenue = 1,17,055 (from HCL P&L \u2192 'Revenue From Operations [Net]' row)",
+        ],
+        f"Operating Profit Ratio = {h_ebit:,} / 1,17,055 x 100",
+        f"Operating Profit Ratio = {HR['Operating Profit Ratio (%)'][0]:.2f}%",
+        [
+            f"PBT = {W_PNL['pbt'][0]:,.1f} (from Wipro P&L \u2192 'Profit/Loss Before Tax' row)",
+            f"Finance Costs = {W_PNL['fin_cost'][0]:,} (from Wipro P&L \u2192 'Finance Costs' row)",
+            f"EBIT = {W_PNL['pbt'][0]:,.1f} + {W_PNL['fin_cost'][0]:,} = {w_ebit:,.1f}",
+            "Revenue = 89,088.4 (from Wipro P&L \u2192 'Revenue From Operations [Net]' row)",
+        ],
+        f"Operating Profit Ratio = {w_ebit:,.1f} / 89,088.4 x 100",
+        f"Operating Profit Ratio = {WR['Operating Profit Ratio (%)'][0]:.2f}%",
+        "HCL's EBIT margin (20.42%) marginally trails Wipro (21.26%) in FY2025. However, HCL has "
+        "been more consistent over 5 years with less volatility in operating margins."
+    )
+
+    proof_enhanced(
+        "6. Net Profit Ratio (%)",
+        "Profit After Tax (PAT) / Revenue x 100",
+        [
+            f"PAT = {H_PNL['pat'][0]:,} (from HCL P&L \u2192 'Profit/Loss After Tax' row)",
+            "Revenue = 1,17,055 (from HCL P&L \u2192 'Revenue From Operations [Net]' row)",
+        ],
+        f"Net Profit Ratio = {H_PNL['pat'][0]:,} / 1,17,055 x 100",
+        f"Net Profit Ratio = {HR['Net Profit Ratio (%)'][0]:.2f}%",
+        [
+            f"PAT = {W_PNL['pat'][0]:,.1f} (from Wipro P&L \u2192 'Profit/Loss After Tax' row)",
+            "Revenue = 89,088.4 (from Wipro P&L \u2192 'Revenue From Operations [Net]' row)",
+        ],
+        f"Net Profit Ratio = {W_PNL['pat'][0]:,.1f} / 89,088.4 x 100",
+        f"Net Profit Ratio = {WR['Net Profit Ratio (%)'][0]:.2f}%",
+        "Both companies have comparable NPM in FY2025 (~14.8%), but HCL has maintained this level "
+        "more consistently while Wipro dipped to 12.4% in FY2024 before recovering."
+    )
 
     h_avg_eq = (H_BS['total_shf'][0] + H_BS['total_shf'][1]) / 2
     w_avg_eq = (W_BS['total_shf'][0] + W_BS['total_shf'][1]) / 2
-    proof("7. Return on Equity (ROE) (%)",
-          "PAT / Average Shareholders' Funds x 100",
-          f"17,399 / Avg(69,655, 68,263) x 100 = 17,399 / {h_avg_eq:,.0f} x 100",
-          f"{HR['Return on Equity (%)'][0]:.2f}%",
-          f"13,192.6 / Avg(82,364.1, 74,533) x 100 = 13,192.6 / {w_avg_eq:,.1f} x 100",
-          f"{WR['Return on Equity (%)'][0]:.2f}%",
-          "HCL's ROE (25.24%) is significantly higher than Wipro's (16.82%), indicating HCL generates "
-          "substantially more profit per rupee of shareholders' equity. Average is used to smooth the effect "
-          "of equity changes during the year.")
 
-    h_ebit = H_PNL['pbt'][0] + H_PNL['fin_cost'][0]
+    proof_enhanced(
+        "7. Return on Equity (ROE) (%)",
+        "PAT / Average Shareholders' Funds x 100\nAverage = (Opening + Closing) / 2",
+        [
+            f"PAT = {H_PNL['pat'][0]:,} (from HCL P&L \u2192 'Profit/Loss After Tax' row)",
+            f"Total Shareholders' Funds FY2025 = {H_BS['total_shf'][0]:,} (from HCL Balance Sheet \u2192 'Total Shareholders Funds' row)",
+            f"Total Shareholders' Funds FY2024 = {H_BS['total_shf'][1]:,} (from HCL Balance Sheet FY2024 \u2192 same row)",
+            f"Average Shareholders' Funds = ({H_BS['total_shf'][0]:,} + {H_BS['total_shf'][1]:,}) / 2 = {h_avg_eq:,.0f}",
+        ],
+        f"ROE = {H_PNL['pat'][0]:,} / {h_avg_eq:,.0f} x 100",
+        f"ROE = {HR['Return on Equity (%)'][0]:.2f}%",
+        [
+            f"PAT = {W_PNL['pat'][0]:,.1f} (from Wipro P&L \u2192 'Profit/Loss After Tax' row)",
+            f"Total Shareholders' Funds FY2025 = {W_BS['total_shf'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Total Shareholders Funds' row)",
+            f"Total Shareholders' Funds FY2024 = {W_BS['total_shf'][1]:,} (from Wipro Balance Sheet FY2024 \u2192 same row)",
+            f"Average Shareholders' Funds = ({W_BS['total_shf'][0]:,.1f} + {W_BS['total_shf'][1]:,}) / 2 = {w_avg_eq:,.1f}",
+        ],
+        f"ROE = {W_PNL['pat'][0]:,.1f} / {w_avg_eq:,.1f} x 100",
+        f"ROE = {WR['Return on Equity (%)'][0]:.2f}%",
+        "HCL's ROE (25.24%) is significantly higher than Wipro's (16.82%), indicating HCL generates "
+        "substantially more profit per rupee of shareholders' equity."
+    )
+
     h_ce = H_BS['total_assets'][0] - H_BS['total_cl'][0]
-    w_ebit = W_PNL['pbt'][0] + W_PNL['fin_cost'][0]
     w_ce = W_BS['total_assets'][0] - W_BS['total_cl'][0]
-    proof("8. Return on Capital Employed (ROCE) (%)",
-          "EBIT / Capital Employed x 100, where CE = Total Assets - Current Liabilities",
-          f"{h_ebit:,} / (1,05,544 - 28,039) x 100 = {h_ebit:,} / {h_ce:,} x 100",
-          f"{HR['Return on Capital Employed (%)'][0]:.2f}%",
-          f"{w_ebit:,.1f} / (1,28,185.2 - 28,625.3) x 100 = {w_ebit:,.1f} / {w_ce:,.1f} x 100",
-          f"{WR['Return on Capital Employed (%)'][0]:.2f}%",
-          "HCL's ROCE (30.84%) far exceeds Wipro's (19.01%), confirming that HCL utilizes its total "
-          "long-term capital more efficiently to generate operating profits.")
 
-    proof("9. Earnings per Share (EPS)",
-          "PAT After Minority Interest / Number of Shares. Shares = Equity Capital / Face Value (Rs 2).",
-          f"17,390 / (543/2) = 17,390 / 271.5", f"Rs {HR['Earnings per Share (Rs)'][0]:.2f}",
-          f"13,135.4 / (2,094.4/2) = 13,135.4 / 1,047.2", f"Rs {WR['Earnings per Share (Rs)'][0]:.2f}",
-          "Direct EPS comparison is limited since Wipro had a bonus issue in FY2025 doubling the share count. "
-          "Over 5 years, HCL's EPS grew 56% (41.07 to 64.05) vs Wipro's per-share decline due to dilution.")
+    proof_enhanced(
+        "8. Return on Capital Employed (ROCE) (%)",
+        "EBIT / Capital Employed x 100\nwhere Capital Employed = Total Assets - Total Current Liabilities",
+        [
+            f"EBIT = {h_ebit:,} (derived: PBT {H_PNL['pbt'][0]:,} + Finance Costs {H_PNL['fin_cost'][0]} from HCL P&L)",
+            f"Total Assets = {H_BS['total_assets'][0]:,} (from HCL Balance Sheet \u2192 'Total Assets' row)",
+            f"Total Current Liabilities = {H_BS['total_cl'][0]:,} (from HCL Balance Sheet \u2192 'Total Current Liabilities' row)",
+            f"Capital Employed = {H_BS['total_assets'][0]:,} - {H_BS['total_cl'][0]:,} = {h_ce:,}",
+        ],
+        f"ROCE = {h_ebit:,} / {h_ce:,} x 100",
+        f"ROCE = {HR['Return on Capital Employed (%)'][0]:.2f}%",
+        [
+            f"EBIT = {w_ebit:,.1f} (derived: PBT {W_PNL['pbt'][0]:,.1f} + Finance Costs {W_PNL['fin_cost'][0]:,} from Wipro P&L)",
+            f"Total Assets = {W_BS['total_assets'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Total Assets' row)",
+            f"Total Current Liabilities = {W_BS['total_cl'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Total Current Liabilities' row)",
+            f"Capital Employed = {W_BS['total_assets'][0]:,.1f} - {W_BS['total_cl'][0]:,.1f} = {w_ce:,.1f}",
+        ],
+        f"ROCE = {w_ebit:,.1f} / {w_ce:,.1f} x 100",
+        f"ROCE = {WR['Return on Capital Employed (%)'][0]:.2f}%",
+        "HCL's ROCE (30.84%) far exceeds Wipro's (19.01%), confirming that HCL utilizes its total "
+        "long-term capital more efficiently to generate operating profits."
+    )
 
+    h_sh = H_BS['eq_capital'][0] / FACE_VALUE
+    w_sh = W_BS['eq_capital'][0] / FACE_VALUE
+
+    proof_enhanced(
+        "9. Earnings per Share (EPS)",
+        "PAT After Minority Interest / Number of Shares\nShares Outstanding = Equity Share Capital / Face Value (Rs 2 per share)",
+        [
+            f"PAT After MI = {H_PNL['pat_mi'][0]:,} (from HCL P&L \u2192 'Consolidated Profit/Loss After MI' row)",
+            f"Equity Share Capital = {H_BS['eq_capital'][0]} (from HCL Balance Sheet \u2192 'Equity Share Capital' row)",
+            f"Face Value = Rs {FACE_VALUE} per share",
+            f"Shares Outstanding = {H_BS['eq_capital'][0]} / {FACE_VALUE} = {h_sh:.1f} Cr shares",
+        ],
+        f"EPS = {H_PNL['pat_mi'][0]:,} / {h_sh:.1f} = Rs {HR['Earnings per Share (Rs)'][0]:.2f}",
+        f"EPS = Rs {HR['Earnings per Share (Rs)'][0]:.2f} per share",
+        [
+            f"PAT After MI = {W_PNL['pat_mi'][0]:,.1f} (from Wipro P&L \u2192 'Consolidated Profit/Loss After MI' row)",
+            f"Equity Share Capital = {W_BS['eq_capital'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Equity Share Capital' row)",
+            f"Face Value = Rs {FACE_VALUE} per share",
+            f"Shares Outstanding = {W_BS['eq_capital'][0]:,.1f} / {FACE_VALUE} = {w_sh:.1f} Cr shares",
+        ],
+        f"EPS = {W_PNL['pat_mi'][0]:,.1f} / {w_sh:.1f} = Rs {WR['Earnings per Share (Rs)'][0]:.2f}",
+        f"EPS = Rs {WR['Earnings per Share (Rs)'][0]:.2f} per share",
+        "Direct EPS comparison is limited since Wipro had a bonus issue in FY2025 doubling the share count. "
+        "Over 5 years, HCL's EPS grew 56% (41.07 to 64.05) vs Wipro's per-share decline due to dilution."
+    )
+
+    # ===================== C. SOLVENCY RATIOS =====================
     _add_heading(doc, "C. Solvency Ratios", level=2)
 
     h_td = H_BS['lt_borr'][0] + H_BS['st_borr'][0]
     w_td = W_BS['lt_borr'][0] + W_BS['st_borr'][0]
-    proof("10. Debt-Equity Ratio",
-          "Total Debt / Total Shareholders' Funds, where Total Debt = LT + ST Borrowings",
-          f"(70 + 2,221) / 69,655 = {h_td:,} / 69,655", f"{HR['Debt-Equity Ratio'][0]:.4f}",
-          f"(6,395.4 + 9,786.3) / 82,364.1 = {w_td:,.1f} / 82,364.1", f"{WR['Debt-Equity Ratio'][0]:.4f}",
-          "HCL is nearly debt-free (D/E 0.03), while Wipro carries meaningful debt (D/E 0.20) "
-          "primarily from acquisition financing. Lower leverage = lower financial risk.")
 
-    proof("11. Interest Coverage Ratio",
-          "EBIT / Finance Costs",
-          f"{h_ebit:,} / 644", f"{HR['Interest Coverage Ratio'][0]:.2f}x",
-          f"{w_ebit:,.1f} / 1,477", f"{WR['Interest Coverage Ratio'][0]:.2f}x",
-          "HCL's interest coverage (37.12x) is much higher than Wipro's (12.82x). Both are comfortable, "
-          "but HCL has virtually zero debt service risk. Note: HCL's finance costs include lease liabilities.")
+    proof_enhanced(
+        "10. Debt-Equity Ratio",
+        "Total Debt / Total Shareholders' Funds\nwhere Total Debt = Long Term Borrowings + Short Term Borrowings",
+        [
+            f"Long Term Borrowings = {H_BS['lt_borr'][0]} (from HCL Balance Sheet \u2192 'Long Term Borrowings' row)",
+            f"Short Term Borrowings = {H_BS['st_borr'][0]:,} (from HCL Balance Sheet \u2192 'Short Term Borrowings' row)",
+            f"Total Debt = {H_BS['lt_borr'][0]} + {H_BS['st_borr'][0]:,} = {h_td:,}",
+            f"Total Shareholders' Funds = {H_BS['total_shf'][0]:,} (from HCL Balance Sheet \u2192 'Total Shareholders Funds' row)",
+        ],
+        f"Debt-Equity Ratio = {h_td:,} / {H_BS['total_shf'][0]:,}",
+        f"Debt-Equity Ratio = {HR['Debt-Equity Ratio'][0]:.4f}",
+        [
+            f"Long Term Borrowings = {W_BS['lt_borr'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Long Term Borrowings' row)",
+            f"Short Term Borrowings = {W_BS['st_borr'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Short Term Borrowings' row)",
+            f"Total Debt = {W_BS['lt_borr'][0]:,.1f} + {W_BS['st_borr'][0]:,.1f} = {w_td:,.1f}",
+            f"Total Shareholders' Funds = {W_BS['total_shf'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Total Shareholders Funds' row)",
+        ],
+        f"Debt-Equity Ratio = {w_td:,.1f} / {W_BS['total_shf'][0]:,.1f}",
+        f"Debt-Equity Ratio = {WR['Debt-Equity Ratio'][0]:.4f}",
+        "HCL is nearly debt-free (D/E 0.03), while Wipro carries meaningful debt (D/E 0.20) "
+        "primarily from acquisition financing. Lower leverage = lower financial risk."
+    )
 
+    proof_enhanced(
+        "11. Interest Coverage Ratio",
+        "EBIT / Finance Costs",
+        [
+            f"EBIT = {h_ebit:,} (derived: PBT {H_PNL['pbt'][0]:,} + Finance Costs {H_PNL['fin_cost'][0]} from HCL P&L)",
+            f"Finance Costs = {H_PNL['fin_cost'][0]} (from HCL P&L \u2192 'Finance Costs' row)",
+        ],
+        f"Interest Coverage = {h_ebit:,} / {H_PNL['fin_cost'][0]}",
+        f"Interest Coverage = {HR['Interest Coverage Ratio'][0]:.2f}x",
+        [
+            f"EBIT = {w_ebit:,.1f} (derived: PBT {W_PNL['pbt'][0]:,.1f} + Finance Costs {W_PNL['fin_cost'][0]:,} from Wipro P&L)",
+            f"Finance Costs = {W_PNL['fin_cost'][0]:,} (from Wipro P&L \u2192 'Finance Costs' row)",
+        ],
+        f"Interest Coverage = {w_ebit:,.1f} / {W_PNL['fin_cost'][0]:,}",
+        f"Interest Coverage = {WR['Interest Coverage Ratio'][0]:.2f}x",
+        "HCL's interest coverage (37.12x) is much higher than Wipro's (12.82x). Both are comfortable, "
+        "but HCL has virtually zero debt service risk."
+    )
+
+    # ===================== D. TURNOVER RATIOS =====================
     _add_heading(doc, "D. Turnover Ratios", level=2)
 
     h_avg_rec = (H_BS['trade_rec'][0] + H_BS['trade_rec'][1]) / 2
     w_avg_rec = (W_BS['trade_rec'][0] + W_BS['trade_rec'][1]) / 2
-    proof("12. Debtors Turnover Ratio",
-          "Revenue / Average Trade Receivables",
-          f"1,17,055 / Avg(25,842, 25,521) = 1,17,055 / {h_avg_rec:,.1f}",
-          f"{HR['Debtors Turnover Ratio'][0]:.2f}x",
-          f"89,088.4 / Avg(11,774.5, 17,382.2) = 89,088.4 / {w_avg_rec:,.1f}",
-          f"{WR['Debtors Turnover Ratio'][0]:.2f}x",
-          "Wipro collects receivables faster (6.11x vs 4.56x), but this partly reflects "
-          "Wipro's receivables normalizing from a FY2024 spike.")
 
-    proof("13. Average Collection Period",
-          "365 / Debtors Turnover",
-          f"365 / {HR['Debtors Turnover Ratio'][0]:.2f}",
-          f"{HR['Avg Collection Period (days)'][0]:.1f} days",
-          f"365 / {WR['Debtors Turnover Ratio'][0]:.2f}",
-          f"{WR['Avg Collection Period (days)'][0]:.1f} days",
-          "HCL takes ~80 days to collect from clients vs Wipro's ~60 days. Both are within "
-          "normal IT services range (60-90 days).")
+    proof_enhanced(
+        "12. Debtors Turnover Ratio",
+        "Revenue / Average Trade Receivables\nAverage = (FY2025 + FY2024) / 2",
+        [
+            "Revenue = 1,17,055 (from HCL P&L \u2192 'Revenue From Operations [Net]' row)",
+            f"Trade Receivables FY2025 = {H_BS['trade_rec'][0]:,} (from HCL Balance Sheet FY2025 \u2192 'Trade Receivables' row)",
+            f"Trade Receivables FY2024 = {H_BS['trade_rec'][1]:,} (from HCL Balance Sheet FY2024 \u2192 'Trade Receivables' row)",
+            f"Average Trade Receivables = ({H_BS['trade_rec'][0]:,} + {H_BS['trade_rec'][1]:,}) / 2 = {h_avg_rec:,.1f}",
+        ],
+        f"Debtors Turnover = 1,17,055 / {h_avg_rec:,.1f}",
+        f"Debtors Turnover = {HR['Debtors Turnover Ratio'][0]:.2f}x",
+        [
+            "Revenue = 89,088.4 (from Wipro P&L \u2192 'Revenue From Operations [Net]' row)",
+            f"Trade Receivables FY2025 = {W_BS['trade_rec'][0]:,.1f} (from Wipro Balance Sheet FY2025 \u2192 'Trade Receivables' row)",
+            f"Trade Receivables FY2024 = {W_BS['trade_rec'][1]:,.1f} (from Wipro Balance Sheet FY2024 \u2192 'Trade Receivables' row)",
+            f"Average Trade Receivables = ({W_BS['trade_rec'][0]:,.1f} + {W_BS['trade_rec'][1]:,.1f}) / 2 = {w_avg_rec:,.1f}",
+        ],
+        f"Debtors Turnover = 89,088.4 / {w_avg_rec:,.1f}",
+        f"Debtors Turnover = {WR['Debtors Turnover Ratio'][0]:.2f}x",
+        "Wipro collects receivables faster (6.11x vs 4.56x), but this partly reflects "
+        "Wipro's receivables normalizing from a FY2024 spike."
+    )
+
+    proof_enhanced(
+        "13. Average Collection Period",
+        "365 / Debtors Turnover Ratio",
+        [
+            f"Debtors Turnover Ratio = {HR['Debtors Turnover Ratio'][0]:.2f}x (computed above in Ratio #12)",
+        ],
+        f"Avg Collection Period = 365 / {HR['Debtors Turnover Ratio'][0]:.2f}",
+        f"Avg Collection Period = {HR['Avg Collection Period (days)'][0]:.1f} days",
+        [
+            f"Debtors Turnover Ratio = {WR['Debtors Turnover Ratio'][0]:.2f}x (computed above in Ratio #12)",
+        ],
+        f"Avg Collection Period = 365 / {WR['Debtors Turnover Ratio'][0]:.2f}",
+        f"Avg Collection Period = {WR['Avg Collection Period (days)'][0]:.1f} days",
+        "HCL takes ~80 days to collect from clients vs Wipro's ~60 days. Both are within "
+        "normal IT services range (60-90 days)."
+    )
 
     h_purch = H_PNL['purchase'][0] + H_PNL['op_exp'][0] + H_PNL['other_exp'][0]
     w_purch = W_PNL['purchase'][0] + W_PNL['op_exp'][0] + W_PNL['other_exp'][0]
     h_avg_pay = (H_BS['trade_pay'][0] + H_BS['trade_pay'][1]) / 2
     w_avg_pay = (W_BS['trade_pay'][0] + W_BS['trade_pay'][1]) / 2
-    proof("14. Creditors Turnover Ratio",
-          "(Purchase + Operating Exp + Other Exp) / Average Trade Payables",
-          f"({H_PNL['purchase'][0]:,} + {H_PNL['op_exp'][0]:,} + {H_PNL['other_exp'][0]:,}) / "
-          f"Avg(13,234, 5,853) = {h_purch:,} / {h_avg_pay:,.1f}",
-          f"{HR['Creditors Turnover Ratio'][0]:.2f}x",
-          f"({W_PNL['purchase'][0]:,} + {W_PNL['op_exp'][0]:,.1f} + {W_PNL['other_exp'][0]:,.1f}) / "
-          f"Avg(5,866.7, 5,765.5) = {w_purch:,.1f} / {w_avg_pay:,.1f}",
-          f"{WR['Creditors Turnover Ratio'][0]:.2f}x",
-          "Lower creditors turnover for HCL (2.59x vs 3.02x) means HCL takes longer to pay suppliers, "
-          "which is favorable for cash management but may reflect the FY2025 payables spike.")
 
-    proof("15. Average Payment Period",
-          "365 / Creditors Turnover",
-          f"365 / {HR['Creditors Turnover Ratio'][0]:.2f}",
-          f"{HR['Avg Payment Period (days)'][0]:.1f} days",
-          f"365 / {WR['Creditors Turnover Ratio'][0]:.2f}",
-          f"{WR['Avg Payment Period (days)'][0]:.1f} days",
-          "HCL takes ~141 days vs Wipro's ~121 days to pay creditors.")
+    proof_enhanced(
+        "14. Creditors Turnover Ratio",
+        "(Purchase + Operating Exp + Other Exp) / Average Trade Payables",
+        [
+            f"Purchase of Stock-in-Trade = {H_PNL['purchase'][0]:,} (from HCL P&L \u2192 'Purchase Of Stock-In Trade' row)",
+            f"Operating & Direct Expenses = {H_PNL['op_exp'][0]:,} (from HCL P&L \u2192 'Operating And Direct Expenses' row)",
+            f"Other Expenses = {H_PNL['other_exp'][0]:,} (from HCL P&L \u2192 'Other Expenses' row)",
+            f"Total Purchases = {H_PNL['purchase'][0]:,} + {H_PNL['op_exp'][0]:,} + {H_PNL['other_exp'][0]:,} = {h_purch:,}",
+            f"Trade Payables FY2025 = {H_BS['trade_pay'][0]:,} (from HCL Balance Sheet \u2192 'Trade Payables' row)",
+            f"Trade Payables FY2024 = {H_BS['trade_pay'][1]:,} (from HCL Balance Sheet FY2024 \u2192 same row)",
+            f"Average Trade Payables = ({H_BS['trade_pay'][0]:,} + {H_BS['trade_pay'][1]:,}) / 2 = {h_avg_pay:,.1f}",
+        ],
+        f"Creditors Turnover = {h_purch:,} / {h_avg_pay:,.1f}",
+        f"Creditors Turnover = {HR['Creditors Turnover Ratio'][0]:.2f}x",
+        [
+            f"Purchase of Stock-in-Trade = {W_PNL['purchase'][0]} (from Wipro P&L \u2192 'Purchase Of Stock-In Trade' row)",
+            f"Operating & Direct Expenses = {W_PNL['op_exp'][0]:,.1f} (from Wipro P&L \u2192 'Operating And Direct Expenses' row)",
+            f"Other Expenses = {W_PNL['other_exp'][0]:,.1f} (from Wipro P&L \u2192 'Other Expenses' row)",
+            f"Total Purchases = {W_PNL['purchase'][0]} + {W_PNL['op_exp'][0]:,.1f} + {W_PNL['other_exp'][0]:,.1f} = {w_purch:,.1f}",
+            f"Trade Payables FY2025 = {W_BS['trade_pay'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Trade Payables' row)",
+            f"Trade Payables FY2024 = {W_BS['trade_pay'][1]:,.1f} (from Wipro Balance Sheet FY2024 \u2192 same row)",
+            f"Average Trade Payables = ({W_BS['trade_pay'][0]:,.1f} + {W_BS['trade_pay'][1]:,.1f}) / 2 = {w_avg_pay:,.1f}",
+        ],
+        f"Creditors Turnover = {w_purch:,.1f} / {w_avg_pay:,.1f}",
+        f"Creditors Turnover = {WR['Creditors Turnover Ratio'][0]:.2f}x",
+        "Lower creditors turnover for HCL (2.59x vs 3.02x) means HCL takes longer to pay suppliers, "
+        "which is favorable for cash management but may reflect the FY2025 payables spike."
+    )
+
+    proof_enhanced(
+        "15. Average Payment Period",
+        "365 / Creditors Turnover Ratio",
+        [
+            f"Creditors Turnover Ratio = {HR['Creditors Turnover Ratio'][0]:.2f}x (computed above in Ratio #14)",
+        ],
+        f"Avg Payment Period = 365 / {HR['Creditors Turnover Ratio'][0]:.2f}",
+        f"Avg Payment Period = {HR['Avg Payment Period (days)'][0]:.1f} days",
+        [
+            f"Creditors Turnover Ratio = {WR['Creditors Turnover Ratio'][0]:.2f}x (computed above in Ratio #14)",
+        ],
+        f"Avg Payment Period = 365 / {WR['Creditors Turnover Ratio'][0]:.2f}",
+        f"Avg Payment Period = {WR['Avg Payment Period (days)'][0]:.1f} days",
+        "HCL takes ~141 days vs Wipro's ~121 days to pay creditors."
+    )
 
     h_cogs_v = H_PNL['purchase'][0] + H_PNL['op_exp'][0] + H_PNL['inv_change'][0]
     w_cogs_v = W_PNL['purchase'][0] + W_PNL['op_exp'][0] + W_PNL['inv_change'][0]
     h_avg_inv = (H_BS['inventories'][0] + H_BS['inventories'][1]) / 2
     w_avg_inv = (W_BS['inventories'][0] + W_BS['inventories'][1]) / 2
-    proof("16. Inventory Turnover Ratio",
-          "COGS / Average Inventories, where COGS = Purchase + Operating Exp + Inventory Changes",
-          f"{h_cogs_v:,} / Avg(133, 185) = {h_cogs_v:,} / {h_avg_inv:.1f}",
-          f"{HR['Inventory Turnover Ratio'][0]:.2f}x",
-          f"{w_cogs_v:,.1f} / Avg(69.4, 90.7) = {w_cogs_v:,.1f} / {w_avg_inv:.1f}",
-          f"{WR['Inventory Turnover Ratio'][0]:.2f}x",
-          "Extremely high turnover for both companies (100x+) because IT services firms hold minimal "
-          "inventory. This ratio is less meaningful for the services sector.")
 
-    proof("17. Inventory Holding Days",
-          "365 / Inventory Turnover",
-          f"365 / {HR['Inventory Turnover Ratio'][0]:.2f}",
-          f"{HR['Inventory Holding Days'][0]:.1f} days",
-          f"365 / {WR['Inventory Turnover Ratio'][0]:.2f}",
-          f"{WR['Inventory Holding Days'][0]:.1f} days",
-          "Near-zero holding days confirm the asset-light IT services model.")
+    proof_enhanced(
+        "16. Inventory Turnover Ratio",
+        "COGS / Average Inventories\nwhere COGS = Purchase + Operating Exp + Inventory Changes",
+        [
+            f"COGS = {h_cogs_v:,} (derived: {H_PNL['purchase'][0]:,} + {H_PNL['op_exp'][0]:,} + {H_PNL['inv_change'][0]} from HCL P&L)",
+            f"Inventories FY2025 = {H_BS['inventories'][0]} (from HCL Balance Sheet \u2192 'Inventories' row)",
+            f"Inventories FY2024 = {H_BS['inventories'][1]} (from HCL Balance Sheet FY2024 \u2192 same row)",
+            f"Average Inventories = ({H_BS['inventories'][0]} + {H_BS['inventories'][1]}) / 2 = {h_avg_inv:.1f}",
+        ],
+        f"Inventory Turnover = {h_cogs_v:,} / {h_avg_inv:.1f}",
+        f"Inventory Turnover = {HR['Inventory Turnover Ratio'][0]:.2f}x",
+        [
+            f"COGS = {w_cogs_v:,.1f} (derived: {W_PNL['purchase'][0]} + {W_PNL['op_exp'][0]:,.1f} + {W_PNL['inv_change'][0]} from Wipro P&L)",
+            f"Inventories FY2025 = {W_BS['inventories'][0]} (from Wipro Balance Sheet \u2192 'Inventories' row)",
+            f"Inventories FY2024 = {W_BS['inventories'][1]} (from Wipro Balance Sheet FY2024 \u2192 same row)",
+            f"Average Inventories = ({W_BS['inventories'][0]} + {W_BS['inventories'][1]}) / 2 = {w_avg_inv:.1f}",
+        ],
+        f"Inventory Turnover = {w_cogs_v:,.1f} / {w_avg_inv:.1f}",
+        f"Inventory Turnover = {WR['Inventory Turnover Ratio'][0]:.2f}x",
+        "Extremely high turnover for both companies (100x+) because IT services firms hold minimal "
+        "inventory. This ratio is less meaningful for the services sector."
+    )
+
+    proof_enhanced(
+        "17. Inventory Holding Days",
+        "365 / Inventory Turnover Ratio",
+        [
+            f"Inventory Turnover Ratio = {HR['Inventory Turnover Ratio'][0]:.2f}x (computed above in Ratio #16)",
+        ],
+        f"Inventory Holding Days = 365 / {HR['Inventory Turnover Ratio'][0]:.2f}",
+        f"Inventory Holding Days = {HR['Inventory Holding Days'][0]:.1f} days",
+        [
+            f"Inventory Turnover Ratio = {WR['Inventory Turnover Ratio'][0]:.2f}x (computed above in Ratio #16)",
+        ],
+        f"Inventory Holding Days = 365 / {WR['Inventory Turnover Ratio'][0]:.2f}",
+        f"Inventory Holding Days = {WR['Inventory Holding Days'][0]:.1f} days",
+        "Near-zero holding days confirm the asset-light IT services model."
+    )
 
     h_avg_fa = (H_BS['fixed_assets'][0] + H_BS['fixed_assets'][1]) / 2
     w_avg_fa = (W_BS['fixed_assets'][0] + W_BS['fixed_assets'][1]) / 2
-    proof("18. Fixed Asset Turnover Ratio",
-          "Revenue / Average Fixed Assets",
-          f"1,17,055 / Avg(14,475, 15,039) = 1,17,055 / {h_avg_fa:,.1f}",
-          f"{HR['Fixed Asset Turnover'][0]:.2f}x",
-          f"89,088.4 / Avg(13,348.5, 13,206.5) = 89,088.4 / {w_avg_fa:,.1f}",
-          f"{WR['Fixed Asset Turnover'][0]:.2f}x",
-          "HCL generates Rs 7.93 of revenue per Rs 1 of fixed assets vs Wipro's Rs 6.71. "
-          "Higher asset turnover reflects HCL's more efficient use of physical infrastructure.")
 
+    proof_enhanced(
+        "18. Fixed Asset Turnover Ratio",
+        "Revenue / Average Fixed Assets\nAverage = (FY2025 + FY2024) / 2",
+        [
+            "Revenue = 1,17,055 (from HCL P&L \u2192 'Revenue From Operations [Net]' row)",
+            f"Fixed Assets FY2025 = {H_BS['fixed_assets'][0]:,} (from HCL Balance Sheet \u2192 'Fixed Assets' row)",
+            f"Fixed Assets FY2024 = {H_BS['fixed_assets'][1]:,} (from HCL Balance Sheet FY2024 \u2192 same row)",
+            f"Average Fixed Assets = ({H_BS['fixed_assets'][0]:,} + {H_BS['fixed_assets'][1]:,}) / 2 = {h_avg_fa:,.1f}",
+        ],
+        f"Fixed Asset Turnover = 1,17,055 / {h_avg_fa:,.1f}",
+        f"Fixed Asset Turnover = {HR['Fixed Asset Turnover'][0]:.2f}x",
+        [
+            "Revenue = 89,088.4 (from Wipro P&L \u2192 'Revenue From Operations [Net]' row)",
+            f"Fixed Assets FY2025 = {W_BS['fixed_assets'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Fixed Assets' row)",
+            f"Fixed Assets FY2024 = {W_BS['fixed_assets'][1]:,.1f} (from Wipro Balance Sheet FY2024 \u2192 same row)",
+            f"Average Fixed Assets = ({W_BS['fixed_assets'][0]:,.1f} + {W_BS['fixed_assets'][1]:,.1f}) / 2 = {w_avg_fa:,.1f}",
+        ],
+        f"Fixed Asset Turnover = 89,088.4 / {w_avg_fa:,.1f}",
+        f"Fixed Asset Turnover = {WR['Fixed Asset Turnover'][0]:.2f}x",
+        "HCL generates Rs 7.93 of revenue per Rs 1 of fixed assets vs Wipro's Rs 6.71. "
+        "Higher asset turnover reflects HCL's more efficient use of physical infrastructure."
+    )
+
+    # ===================== E. VALUATION RATIO =====================
     _add_heading(doc, "E. Valuation Ratio", level=2)
 
-    proof("19. P/E Ratio",
-          "Market Price per Share / EPS. Market Price derived from Price/BV x Book Value per Share.",
-          f"({H_MKT['price_bv'][0]} x {H_MKT['bv_share'][0]}) / {HR['Earnings per Share (Rs)'][0]:.2f} "
-          f"= {HR['_mp'][0]:.2f} / {HR['Earnings per Share (Rs)'][0]:.2f}",
-          f"{HR['P/E Ratio'][0]:.2f}x",
-          f"({W_MKT['price_bv'][0]} x {W_MKT['bv_share'][0]}) / {WR['Earnings per Share (Rs)'][0]:.2f} "
-          f"= {WR['_mp'][0]:.2f} / {WR['Earnings per Share (Rs)'][0]:.2f}",
-          f"{WR['P/E Ratio'][0]:.2f}x",
-          "HCL commands a higher P/E ({:.1f}x vs {:.1f}x), reflecting the market's willingness to pay "
-          "a premium for HCL's consistent growth and superior return profile.".format(
-              HR['P/E Ratio'][0], WR['P/E Ratio'][0]))
+    proof_enhanced(
+        "19. P/E Ratio",
+        "Market Price per Share / EPS\nMarket Price = Price/BV x Book Value per Share (from Moneycontrol Ratios page)",
+        [
+            f"Price/BV = {H_MKT['price_bv'][0]} (from HCL Moneycontrol \u2192 'Price/BV (X)' ratio)",
+            f"Book Value per Share = {H_MKT['bv_share'][0]} (from HCL Moneycontrol \u2192 'Book Value/Share' ratio)",
+            f"Market Price per Share = {H_MKT['price_bv'][0]} x {H_MKT['bv_share'][0]} = {HR['_mp'][0]:.2f}",
+            f"EPS = {HR['Earnings per Share (Rs)'][0]:.2f} (computed above in Ratio #9)",
+        ],
+        f"P/E Ratio = {HR['_mp'][0]:.2f} / {HR['Earnings per Share (Rs)'][0]:.2f}",
+        f"P/E Ratio = {HR['P/E Ratio'][0]:.2f}x",
+        [
+            f"Price/BV = {W_MKT['price_bv'][0]} (from Wipro Moneycontrol \u2192 'Price/BV (X)' ratio)",
+            f"Book Value per Share = {W_MKT['bv_share'][0]} (from Wipro Moneycontrol \u2192 'Book Value/Share' ratio)",
+            f"Market Price per Share = {W_MKT['price_bv'][0]} x {W_MKT['bv_share'][0]} = {WR['_mp'][0]:.2f}",
+            f"EPS = {WR['Earnings per Share (Rs)'][0]:.2f} (computed above in Ratio #9)",
+        ],
+        f"P/E Ratio = {WR['_mp'][0]:.2f} / {WR['Earnings per Share (Rs)'][0]:.2f}",
+        f"P/E Ratio = {WR['P/E Ratio'][0]:.2f}x",
+        "HCL commands a higher P/E ({:.1f}x vs {:.1f}x), reflecting the market's willingness to pay "
+        "a premium for HCL's consistent growth and superior return profile.".format(
+            HR['P/E Ratio'][0], WR['P/E Ratio'][0])
+    )
 
-    _add_heading(doc, "F. Advanced Analysis Proofs", level=2)
-    _add_para(doc, "DuPont Analysis (FY2025)", bold=True)
-    _add_para(doc, f"HCL: NPM = 17,399/1,17,055 = {HR['_npm'][0]:.4f}", size=10)
-    _add_para(doc, f"      Asset Turnover = 1,17,055/1,05,544 = {HR['_at'][0]:.4f}", size=10)
-    _add_para(doc, f"      Equity Multiplier = 1,05,544/69,655 = {HR['_em'][0]:.4f}", size=10)
-    _add_para(doc, f"      ROE = {HR['_npm'][0]:.4f} x {HR['_at'][0]:.4f} x {HR['_em'][0]:.4f} x 100 = {HR['_roe_d'][0]:.2f}%", size=10)
-    _add_para(doc, f"Wipro: NPM = 13,192.6/89,088.4 = {WR['_npm'][0]:.4f}", size=10)
-    _add_para(doc, f"       Asset Turnover = 89,088.4/1,28,185.2 = {WR['_at'][0]:.4f}", size=10)
-    _add_para(doc, f"       Equity Multiplier = 1,28,185.2/82,364.1 = {WR['_em'][0]:.4f}", size=10)
-    _add_para(doc, f"       ROE = {WR['_npm'][0]:.4f} x {WR['_at'][0]:.4f} x {WR['_em'][0]:.4f} x 100 = {WR['_roe_d'][0]:.2f}%", size=10)
+    # ===================== F. DUPONT ANALYSIS PROOF =====================
+    _add_heading(doc, "F. DuPont Analysis - Detailed Proof (FY2025)", level=2)
 
-    _add_para(doc, "Cash Conversion Cycle (FY2025)", bold=True)
-    _add_para(doc, f"HCL: DIO = 365 x Avg(133,185)/{h_cogs_v:,} = {HR['_dio'][0]:.1f} days", size=10)
-    _add_para(doc, f"      DSO = 365 x Avg(25842,25521)/117055 = {HR['_dso'][0]:.1f} days", size=10)
-    _add_para(doc, f"      DPO = 365 x Avg(13234,5853)/{h_purch:,} = {HR['_dpo'][0]:.1f} days", size=10)
-    _add_para(doc, f"      CCC = {HR['_dio'][0]:.1f} + {HR['_dso'][0]:.1f} - {HR['_dpo'][0]:.1f} = {HR['_ccc'][0]:.1f} days", size=10)
-    _add_para(doc, f"Wipro: DIO = 365 x Avg(69.4,90.7)/{w_cogs_v:,.1f} = {WR['_dio'][0]:.1f} days", size=10)
-    _add_para(doc, f"       DSO = 365 x Avg(11774.5,17382.2)/89088.4 = {WR['_dso'][0]:.1f} days", size=10)
-    _add_para(doc, f"       DPO = 365 x Avg(5866.7,5765.5)/{w_purch:,.1f} = {WR['_dpo'][0]:.1f} days", size=10)
-    _add_para(doc, f"       CCC = {WR['_dio'][0]:.1f} + {WR['_dso'][0]:.1f} - {WR['_dpo'][0]:.1f} = {WR['_ccc'][0]:.1f} days", size=10)
+    _add_para(doc, "Formula: ROE = Net Profit Margin x Asset Turnover x Equity Multiplier x 100", bold=True, size=11)
+    _add_para(doc, "")
+
+    _add_para(doc, "HCL Technologies FY2025:", bold=True, size=11)
+    _add_para(doc, "Step 1: Net Profit Margin (NPM) = PAT / Revenue", bold=True, size=10)
+    for inp in [
+        f"PAT = {H_PNL['pat'][0]:,} (from HCL P&L \u2192 'Profit/Loss After Tax' row)",
+        f"Revenue = {H_PNL['revenue'][0]:,} (from HCL P&L \u2192 'Revenue From Operations [Net]' row)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"NPM = {H_PNL['pat'][0]:,} / {H_PNL['revenue'][0]:,} = {HR['_npm'][0]:.4f}", size=10)
+
+    _add_para(doc, "Step 2: Asset Turnover (AT) = Revenue / Total Assets", bold=True, size=10)
+    for inp in [
+        f"Revenue = {H_PNL['revenue'][0]:,} (from HCL P&L \u2192 'Revenue From Operations [Net]' row)",
+        f"Total Assets = {H_BS['total_assets'][0]:,} (from HCL Balance Sheet \u2192 'Total Assets' row)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"AT = {H_PNL['revenue'][0]:,} / {H_BS['total_assets'][0]:,} = {HR['_at'][0]:.4f}", size=10)
+
+    _add_para(doc, "Step 3: Equity Multiplier (EM) = Total Assets / Total Shareholders' Funds", bold=True, size=10)
+    for inp in [
+        f"Total Assets = {H_BS['total_assets'][0]:,} (from HCL Balance Sheet \u2192 'Total Assets' row)",
+        f"Total Shareholders' Funds = {H_BS['total_shf'][0]:,} (from HCL Balance Sheet \u2192 'Total Shareholders Funds' row)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"EM = {H_BS['total_assets'][0]:,} / {H_BS['total_shf'][0]:,} = {HR['_em'][0]:.4f}", size=10)
+
+    _add_para(doc, f"Step 4: ROE = NPM x AT x EM x 100 = {HR['_npm'][0]:.4f} x {HR['_at'][0]:.4f} x {HR['_em'][0]:.4f} x 100 = {HR['_roe_d'][0]:.2f}%", bold=True, size=10)
+    _add_para(doc, "")
+
+    _add_para(doc, "Wipro FY2025:", bold=True, size=11)
+    _add_para(doc, "Step 1: Net Profit Margin (NPM) = PAT / Revenue", bold=True, size=10)
+    for inp in [
+        f"PAT = {W_PNL['pat'][0]:,.1f} (from Wipro P&L \u2192 'Profit/Loss After Tax' row)",
+        f"Revenue = {W_PNL['revenue'][0]:,.1f} (from Wipro P&L \u2192 'Revenue From Operations [Net]' row)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"NPM = {W_PNL['pat'][0]:,.1f} / {W_PNL['revenue'][0]:,.1f} = {WR['_npm'][0]:.4f}", size=10)
+
+    _add_para(doc, "Step 2: Asset Turnover (AT) = Revenue / Total Assets", bold=True, size=10)
+    for inp in [
+        f"Revenue = {W_PNL['revenue'][0]:,.1f} (from Wipro P&L \u2192 'Revenue From Operations [Net]' row)",
+        f"Total Assets = {W_BS['total_assets'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Total Assets' row)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"AT = {W_PNL['revenue'][0]:,.1f} / {W_BS['total_assets'][0]:,.1f} = {WR['_at'][0]:.4f}", size=10)
+
+    _add_para(doc, "Step 3: Equity Multiplier (EM) = Total Assets / Total Shareholders' Funds", bold=True, size=10)
+    for inp in [
+        f"Total Assets = {W_BS['total_assets'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Total Assets' row)",
+        f"Total Shareholders' Funds = {W_BS['total_shf'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Total Shareholders Funds' row)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"EM = {W_BS['total_assets'][0]:,.1f} / {W_BS['total_shf'][0]:,.1f} = {WR['_em'][0]:.4f}", size=10)
+
+    _add_para(doc, f"Step 4: ROE = NPM x AT x EM x 100 = {WR['_npm'][0]:.4f} x {WR['_at'][0]:.4f} x {WR['_em'][0]:.4f} x 100 = {WR['_roe_d'][0]:.2f}%", bold=True, size=10)
+    _add_para(doc, "")
+
+    # ===================== G. CCC ANALYSIS PROOF =====================
+    _add_heading(doc, "G. Cash Conversion Cycle - Detailed Proof (FY2025)", level=2)
+
+    _add_para(doc, "Formula: CCC = DIO + DSO - DPO (all in days)", bold=True, size=11)
+    _add_para(doc, "")
+
+    _add_para(doc, "HCL Technologies FY2025:", bold=True, size=11)
+
+    _add_para(doc, "Step 1: Days Inventory Outstanding (DIO) = 365 x Average Inventories / COGS", bold=True, size=10)
+    for inp in [
+        f"Inventories FY2025 = {H_BS['inventories'][0]} (from HCL Balance Sheet \u2192 'Inventories' row)",
+        f"Inventories FY2024 = {H_BS['inventories'][1]} (from HCL Balance Sheet FY2024 \u2192 same row)",
+        f"Average Inventories = ({H_BS['inventories'][0]} + {H_BS['inventories'][1]}) / 2 = {h_avg_inv:.1f}",
+        f"COGS = {h_cogs_v:,} (Purchase {H_PNL['purchase'][0]:,} + Op Exp {H_PNL['op_exp'][0]:,} + Inv Change {H_PNL['inv_change'][0]} from HCL P&L)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"DIO = 365 x {h_avg_inv:.1f} / {h_cogs_v:,} = {HR['_dio'][0]:.1f} days", size=10)
+
+    h_avg_rec2 = (H_BS['trade_rec'][0] + H_BS['trade_rec'][1]) / 2
+    _add_para(doc, "Step 2: Days Sales Outstanding (DSO) = 365 x Average Trade Receivables / Revenue", bold=True, size=10)
+    for inp in [
+        f"Trade Receivables FY2025 = {H_BS['trade_rec'][0]:,} (from HCL Balance Sheet \u2192 'Trade Receivables' row)",
+        f"Trade Receivables FY2024 = {H_BS['trade_rec'][1]:,} (from HCL Balance Sheet FY2024 \u2192 same row)",
+        f"Average Trade Receivables = ({H_BS['trade_rec'][0]:,} + {H_BS['trade_rec'][1]:,}) / 2 = {h_avg_rec2:,.1f}",
+        f"Revenue = {H_PNL['revenue'][0]:,} (from HCL P&L \u2192 'Revenue From Operations [Net]' row)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"DSO = 365 x {h_avg_rec2:,.1f} / {H_PNL['revenue'][0]:,} = {HR['_dso'][0]:.1f} days", size=10)
+
+    h_avg_pay2 = (H_BS['trade_pay'][0] + H_BS['trade_pay'][1]) / 2
+    _add_para(doc, "Step 3: Days Payable Outstanding (DPO) = 365 x Average Trade Payables / Purchases", bold=True, size=10)
+    for inp in [
+        f"Trade Payables FY2025 = {H_BS['trade_pay'][0]:,} (from HCL Balance Sheet \u2192 'Trade Payables' row)",
+        f"Trade Payables FY2024 = {H_BS['trade_pay'][1]:,} (from HCL Balance Sheet FY2024 \u2192 same row)",
+        f"Average Trade Payables = ({H_BS['trade_pay'][0]:,} + {H_BS['trade_pay'][1]:,}) / 2 = {h_avg_pay2:,.1f}",
+        f"Purchases = {h_purch:,} (Purchase {H_PNL['purchase'][0]:,} + Op Exp {H_PNL['op_exp'][0]:,} + Other Exp {H_PNL['other_exp'][0]:,} from HCL P&L)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"DPO = 365 x {h_avg_pay2:,.1f} / {h_purch:,} = {HR['_dpo'][0]:.1f} days", size=10)
+
+    _add_para(doc, f"Step 4: CCC = DIO + DSO - DPO = {HR['_dio'][0]:.1f} + {HR['_dso'][0]:.1f} - {HR['_dpo'][0]:.1f} = {HR['_ccc'][0]:.1f} days", bold=True, size=10)
+    _add_para(doc, "")
+
+    _add_para(doc, "Wipro FY2025:", bold=True, size=11)
+
+    _add_para(doc, "Step 1: Days Inventory Outstanding (DIO) = 365 x Average Inventories / COGS", bold=True, size=10)
+    for inp in [
+        f"Inventories FY2025 = {W_BS['inventories'][0]} (from Wipro Balance Sheet \u2192 'Inventories' row)",
+        f"Inventories FY2024 = {W_BS['inventories'][1]} (from Wipro Balance Sheet FY2024 \u2192 same row)",
+        f"Average Inventories = ({W_BS['inventories'][0]} + {W_BS['inventories'][1]}) / 2 = {w_avg_inv:.1f}",
+        f"COGS = {w_cogs_v:,.1f} (Purchase {W_PNL['purchase'][0]} + Op Exp {W_PNL['op_exp'][0]:,.1f} + Inv Change {W_PNL['inv_change'][0]} from Wipro P&L)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"DIO = 365 x {w_avg_inv:.1f} / {w_cogs_v:,.1f} = {WR['_dio'][0]:.1f} days", size=10)
+
+    w_avg_rec2 = (W_BS['trade_rec'][0] + W_BS['trade_rec'][1]) / 2
+    _add_para(doc, "Step 2: Days Sales Outstanding (DSO) = 365 x Average Trade Receivables / Revenue", bold=True, size=10)
+    for inp in [
+        f"Trade Receivables FY2025 = {W_BS['trade_rec'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Trade Receivables' row)",
+        f"Trade Receivables FY2024 = {W_BS['trade_rec'][1]:,.1f} (from Wipro Balance Sheet FY2024 \u2192 same row)",
+        f"Average Trade Receivables = ({W_BS['trade_rec'][0]:,.1f} + {W_BS['trade_rec'][1]:,.1f}) / 2 = {w_avg_rec2:,.1f}",
+        f"Revenue = {W_PNL['revenue'][0]:,.1f} (from Wipro P&L \u2192 'Revenue From Operations [Net]' row)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"DSO = 365 x {w_avg_rec2:,.1f} / {W_PNL['revenue'][0]:,.1f} = {WR['_dso'][0]:.1f} days", size=10)
+
+    w_avg_pay2 = (W_BS['trade_pay'][0] + W_BS['trade_pay'][1]) / 2
+    _add_para(doc, "Step 3: Days Payable Outstanding (DPO) = 365 x Average Trade Payables / Purchases", bold=True, size=10)
+    for inp in [
+        f"Trade Payables FY2025 = {W_BS['trade_pay'][0]:,.1f} (from Wipro Balance Sheet \u2192 'Trade Payables' row)",
+        f"Trade Payables FY2024 = {W_BS['trade_pay'][1]:,.1f} (from Wipro Balance Sheet FY2024 \u2192 same row)",
+        f"Average Trade Payables = ({W_BS['trade_pay'][0]:,.1f} + {W_BS['trade_pay'][1]:,.1f}) / 2 = {w_avg_pay2:,.1f}",
+        f"Purchases = {w_purch:,.1f} (Purchase {W_PNL['purchase'][0]} + Op Exp {W_PNL['op_exp'][0]:,.1f} + Other Exp {W_PNL['other_exp'][0]:,.1f} from Wipro P&L)",
+    ]:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(inp)
+        run.font.name = 'Times New Roman'; run.font.size = Pt(9)
+        p.paragraph_format.space_after = Pt(1)
+    _add_para(doc, f"DPO = 365 x {w_avg_pay2:,.1f} / {w_purch:,.1f} = {WR['_dpo'][0]:.1f} days", size=10)
+
+    _add_para(doc, f"Step 4: CCC = DIO + DSO - DPO = {WR['_dio'][0]:.1f} + {WR['_dso'][0]:.1f} - {WR['_dpo'][0]:.1f} = {WR['_ccc'][0]:.1f} days", bold=True, size=10)
 
     doc.save(out_path)
     print(f"[OK] Ratio proofs saved: {out_path}")
@@ -1186,28 +1677,26 @@ def create_ratio_proofs(out_path):
 def main():
     FINAL.mkdir(parents=True, exist_ok=True)
 
+    print("=== Step 1: Cleaning dataset files (removing standalone, removing Ratios sheet) ===")
+    clean_dataset_files()
+
+    print("\n=== Step 2: Building Excel report (full data + ratios) ===")
     excel_path = FINAL / "excel_report.xlsx"
-    report_path = FINAL / "word_report.docx"
-    proofs_path = FINAL / "ratio_calculation_proofs.docx"
-
     create_excel(excel_path)
+
+    print("\n=== Step 3: Building Word report ===")
+    report_path = FINAL / "word_report.docx"
     create_word_report(report_path)
+
+    print("\n=== Step 4: Building Ratio Calculation Proofs (enhanced with source derivations) ===")
+    proofs_path = FINAL / "ratio_calculation_proofs.docx"
     create_ratio_proofs(proofs_path)
-
-    for src_name in ["HCL Tech-1.xlsx", "Wipro-1.xlsx"]:
-        src = BASE / src_name
-        if src.exists():
-            shutil.copy2(src, FINAL / src_name)
-            print(f"[OK] Copied {src_name} to final/")
-
-    script_path = BASE / "_build_final.py"
-    if script_path.exists():
-        shutil.copy2(script_path, FINAL / "_build_final.py")
 
     print("\n=== ALL DONE ===")
     print(f"Output folder: {FINAL}")
     for f in sorted(FINAL.iterdir()):
-        print(f"  {f.name}")
+        if f.suffix in ['.xlsx', '.docx', '.py', '.md']:
+            print(f"  {f.name}")
 
 if __name__ == "__main__":
     main()
