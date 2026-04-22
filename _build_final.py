@@ -98,6 +98,9 @@ W_BS = dict(
 W_MKT = dict(price_bv=[3.33, 3.37, 2.58, 4.96, 4.13],
               bv_share=[78.65, 142.65, 141.63, 119.40, 100.48])
 
+# FY2020 data for proper CCC averaging at FY2021 boundary
+H_FY2020 = dict(inventories=91, trade_rec=14131, trade_pay=1166)
+W_FY2020 = dict(inventories=186.5, trade_rec=10447.4, trade_pay=5840)
 
 # =======================  RATIO COMPUTATION (Python)  =======================
 def _avg(lst, i):
@@ -147,6 +150,23 @@ def compute_ratios(pnl, bs, mkt):
 
 HR = compute_ratios(H_PNL, H_BS, H_MKT)
 WR = compute_ratios(W_PNL, W_BS, W_MKT)
+
+def _fix_ccc_fy2021(r, pnl, bs, fy2020):
+    """Override FY2021 CCC components with proper 2-year averages using FY2020 data."""
+    i = 4
+    cogs = pnl['purchase'][i] + pnl['op_exp'][i] + pnl['inv_change'][i]
+    purch = pnl['purchase'][i] + pnl['op_exp'][i] + pnl['other_exp'][i]
+    rev = pnl['revenue'][i]
+    avg_inv = (bs['inventories'][i] + fy2020['inventories']) / 2
+    avg_rec = (bs['trade_rec'][i] + fy2020['trade_rec']) / 2
+    avg_pay = (bs['trade_pay'][i] + fy2020['trade_pay']) / 2
+    r['_dio'][i] = 365 * avg_inv / cogs if cogs else 0
+    r['_dso'][i] = 365 * avg_rec / rev
+    r['_dpo'][i] = 365 * avg_pay / purch
+    r['_ccc'][i] = r['_dio'][i] + r['_dso'][i] - r['_dpo'][i]
+
+_fix_ccc_fy2021(HR, H_PNL, H_BS, H_FY2020)
+_fix_ccc_fy2021(WR, W_PNL, W_BS, W_FY2020)
 
 
 # =======================  DATASET CLEANUP  =======================
