@@ -1,7 +1,7 @@
 """
 FMA EC1 Assignment - Final Build Script
 HCL Technologies vs Wipro | Data: HCL Tech-1.xlsx, Wipro-1.xlsx (Moneycontrol)
-Student: K P Manoj | Roll: 2025MB26539
+Students: K P Manoj (2025MB26539), T Venkata Suresh (2025MB26590), Japleen Kaur Khorana (2025MB26602), Varsha PS (2025MB26503), Prashanth G (2025MB26598)
 """
 import os, shutil, copy
 from pathlib import Path
@@ -450,20 +450,24 @@ def create_excel(out_path):
     ws_cover['A3'].font = Font(size=14, bold=True, color="1F4E79")
     ws_cover['A3'].alignment = Alignment(horizontal='center')
     info = [
-        (5, "Student Name:", "K P Manoj"),
-        (6, "BITS ID:", "2025MB26539"),
-        (7, "Course:", "Financial Management & Accounting"),
-        (8, "Programme:", "MBA in AI for Business"),
-        (9, "Institution:", "BITS Pilani (WILP)"),
-        (10, "Semester:", "1 - Batch Jan 2026"),
-        (11, "Period of Analysis:", "FY2021 to FY2025"),
-        (12, "Data Source:", "Moneycontrol (Consolidated Statements)"),
+        (5, "Team Members:", "K P Manoj (2025MB26539)"),
+        (6, "", "T Venkata Suresh (2025MB26590)"),
+        (7, "", "Japleen Kaur Khorana (2025MB26602)"),
+        (8, "", "Varsha PS (2025MB26503)"),
+        (9, "", "Prashanth G (2025MB26598)"),
+        (10, "Course:", "Financial Management & Accounting"),
+        (11, "Programme:", "MBA in AI for Business"),
+        (12, "Institution:", "BITS Pilani (WILP)"),
+        (13, "Semester:", "1 - Batch Jan 2026"),
+        (14, "Period of Analysis:", "FY2021 to FY2025"),
+        (15, "Data Source:", "Moneycontrol (Consolidated Statements)"),
     ]
     for r, lbl, val in info:
-        ws_cover.cell(r, 2, lbl).font = Font(bold=True, size=11)
+        if lbl:
+            ws_cover.cell(r, 2, lbl).font = Font(bold=True, size=11)
         ws_cover.cell(r, 3, val).font = Font(size=11)
     ws_cover.column_dimensions['B'].width = 22
-    ws_cover.column_dimensions['C'].width = 40
+    ws_cover.column_dimensions['C'].width = 45
 
     ws_h = wb.create_sheet("HCL_Data")
     hcl_raw = BASE / "HCL Tech-1.xlsx"
@@ -584,7 +588,9 @@ def create_word_report(out_path):
     _add_para(doc, "FY2021 - FY2025 (Consolidated)", bold=True, size=12,
               align=WD_ALIGN_PARAGRAPH.CENTER)
     _add_para(doc, "")
-    _add_para(doc, "K P Manoj  |  2025MB26539  |  FMA EC1", bold=True, size=11,
+    _add_para(doc, "K P Manoj (2025MB26539)  |  T Venkata Suresh (2025MB26590)  |  Japleen Kaur Khorana (2025MB26602)", bold=True, size=10,
+              align=WD_ALIGN_PARAGRAPH.CENTER)
+    _add_para(doc, "Varsha PS (2025MB26503)  |  Prashanth G (2025MB26598)  |  FMA EC1", bold=True, size=10,
               align=WD_ALIGN_PARAGRAPH.CENTER)
     _add_para(doc, "MBA in AI for Business  |  BITS Pilani (WILP)  |  Semester 1, Jan 2026 Batch",
               size=10, align=WD_ALIGN_PARAGRAPH.CENTER)
@@ -993,7 +999,9 @@ def create_ratio_proofs(out_path):
               align=WD_ALIGN_PARAGRAPH.CENTER)
     _add_para(doc, "HCL Technologies vs Wipro | FY2025 Detailed Calculations", size=11,
               align=WD_ALIGN_PARAGRAPH.CENTER)
-    _add_para(doc, "K P Manoj | 2025MB26539 | FMA EC1", size=10,
+    _add_para(doc, "K P Manoj (2025MB26539) | T Venkata Suresh (2025MB26590) | Japleen Kaur Khorana (2025MB26602)", size=9,
+              align=WD_ALIGN_PARAGRAPH.CENTER)
+    _add_para(doc, "Varsha PS (2025MB26503) | Prashanth G (2025MB26598) | FMA EC1", size=9,
               align=WD_ALIGN_PARAGRAPH.CENTER)
     _add_para(doc, "Data Source: HCL Tech-1.xlsx and Wipro-1.xlsx (Moneycontrol Consolidated)", size=10,
               align=WD_ALIGN_PARAGRAPH.CENTER)
